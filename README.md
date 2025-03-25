@@ -13,7 +13,7 @@ An end-to-end video processing service that automates adaptive streaming, AI tag
 ## Key Features
 
 🚀 **Adaptive Bitrate Streaming**
-- HLS/DASH outputs with 5 renditions (1080p to 270p)
+- HLS outputs with 5 renditions (1080p to 270p)
 - 40% reduction in buffering incidents
 - 30% lower CDN costs compared to fixed-bitrate
   
