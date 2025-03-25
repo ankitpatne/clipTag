@@ -1,0 +1,80 @@
+.upload-container {
+  max-width: 450px;
+  margin: 150px auto;
+  padding: 25px;
+  background-color: #ffffff; /* Light background */
+  color: #333; /* Dark text */
+  border-radius: 12px;
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.15);
+  text-align: center;
+}
+
+h1 {
+  color: #ff9800; /* GSSoC Accent Color */
+  font-size: 26px;
+  font-weight: bold;
+  margin-bottom: 15px;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+}
+
+input,
+textarea {
+  margin: 12px 0;
+  padding: 12px;
+  border: 2px solid #ff9800; /* Accent border */
+  border-radius: 8px;
+  background: #f9fafb; /* Slightly brighter input background */
+  color: #333;
+  font-size: 16px;
+  transition: border 0.3s ease-in-out;
+}
+
+input:focus,
+textarea:focus {
+  border-color: #e68900;
+  outline: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #888;
+}
+
+.file-input {
+  padding: 10px;
+  border-radius: 8px;
+  background-color: #fff;
+  border: 2px dashed #ff9800;
+  text-align: center;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+button {
+  background: #ff9800;
+  color: white;
+  border: none;
+  padding: 12px;
+  font-size: 16px;
+  font-weight: bold;
+  margin-top: 15px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.3s ease-in-out, transform 0.2s;
+}
+
+button:hover {
+  background: #e68900;
+  transform: scale(1.05);
+}
+
+.message {
+  text-align: center;
+  margin-top: 12px;
+  font-size: 14px;
+  color: #ff9800;
+}
