@@ -15,29 +15,33 @@ from google import genai
 from elasticsearch import Elasticsearch
 import json
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
-# os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "path/to/your/service-account-key.json"
+load_dotenv()
 
 # Initialize Elasticsearch client
-es = Elasticsearch("https://localhost:9200",
-                   basic_auth=("elastic", "oNGeOBcU*ubZAylIXeVU"),
-                   verify_certs=False
-    )  # Replace with your Elasticsearch URL if different
+es = Elasticsearch(
+    os.getenv("ELASTICSEARCH_URL"),
+    basic_auth=(os.getenv("ELASTICSEARCH_USERNAME"), os.getenv("ELASTICSEARCH_PASSWORD")), # type: ignore
+    verify_certs=False
+)
 
+# Initialize S3 client
 s3_client = boto3.client(
     's3', 
-    region_name = 'ap-south-1', 
-    aws_access_key_id='AKIAXYKJVRC4EHE6OLF5',
-    aws_secret_access_key='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'
+    region_name=os.getenv("AWS_REGION"),
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
 )
-# Example usage
-bucket_name = 'aws-vod-1-source71e471f1-rgfsfngoq2jv'
+bucket_name = os.getenv("AWS_BUCKET_NAME")
 
-DATABASE_URL = "postgresql://ankit:test123@localhost/inc_db_1"
+# Initialize the database
+DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# Create the Elasticsearch index
 def create_index():
     index_name = "videos"
     if not es.indices.exists(index=index_name):
@@ -61,7 +65,6 @@ def create_index():
         print(f"Index '{index_name}' already exists.")
 
 def generate_presigned_url(bucket_name, object_key, expiration=3600):
-    # object_key = object_key.split(f"https://{bucket_name}.s3.amazonaws.com/")[1]
     url = s3_client.generate_presigned_url(
         'get_object',
         Params={'Bucket': bucket_name, 'Key': object_key},
@@ -69,14 +72,15 @@ def generate_presigned_url(bucket_name, object_key, expiration=3600):
     )
     return url
 
-genAiClient = genai.Client(api_key="AIzaSyCWSO9krG5hxoiz9yA7xJXov0xMlvKwTmU")
+# Initialize the Google API client
+genAiClient = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 def generate_title_description(transcription: str, tags: list):
     title = genAiClient.models.generate_content(
         model="gemini-2.0-flash", contents=f"Generate a concise title for a video about {transcription} with tags {', '.join(tags)}. Give only the title directly without any additional information."
     )
     description = genAiClient.models.generate_content(
-        model="gemini-2.0-flash", contents=f"Generate a description for a video about {transcription} with tags {', '.join(tags)}. Give only the description directly without any additional information. It should be a brief summary of the video content."
+        model="gemini-2.0-flash", contents=f"Generate a description for a video about {transcription} with tags {', '.join(tags)}. Give only the description directly without any additional information. It should be a brief summary of the video content. Each tag should be used in the description."
     )
     return title.text, description.text
 
@@ -86,15 +90,15 @@ class Video(Base):
     video_id = Column(String(100), unique=True, index=True, nullable=False)
     s3_url = Column(String(500), nullable=False)
     duration = Column(Float, nullable=False)
-    tags = Column(JSON)  # Store auto-generated tags as JSON
-    explicit_content = Column(JSON, nullable=True)  # Store explicit content detection results
-    explicit_content_detected = Column(Boolean, nullable=True)  # Store whether explicit content was detected
-    transcription = Column(String, nullable=True)  # Store video transcription
-    streaming_url = Column(String, nullable=True)  # Store streaming URL
-    title = Column(String, nullable=True)  # Store video title
-    description = Column(String, nullable=True)  # Store video description
-    ai_generated_title = Column(String, nullable=True)  # Store AI-generated title
-    ai_generated_description = Column(String, nullable=True)  # Store AI-generated description
+    tags = Column(JSON)
+    explicit_content = Column(JSON, nullable=True)
+    explicit_content_detected = Column(Boolean, nullable=True)
+    transcription = Column(String, nullable=True)
+    streaming_url = Column(String, nullable=True)
+    title = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    ai_generated_title = Column(String, nullable=True)
+    ai_generated_description = Column(String, nullable=True)
 
 def analyze_video(video_id: str, s3_url: str, db: Session):
     # Analyze video using Google Video Intelligence API
@@ -126,12 +130,6 @@ def analyze_video(video_id: str, s3_url: str, db: Session):
     # Extract explicit content detection results
     explicit_content = []
     for frame in result.annotation_results[0].explicit_annotation.frames:
-        # if frame.likelihood in [videointelligence.Likelihood.LIKELY, videointelligence.Likelihood.VERY_LIKELY]:
-        #     explicit_content.append({
-        #         "time_offset": frame.time_offset.seconds + frame.time_offset.microseconds / 1e6,
-        #         "likelihood": videointelligence.Likelihood(frame.likelihood).name
-        #     })
-
         if frame.pornography_likelihood in ["LIKELY", "VERY_LIKELY"]:
             explicit_content.append({
                 "time_offset": frame.time_offset.seconds + frame.time_offset.microseconds / 1e6,
@@ -148,29 +146,17 @@ def analyze_video(video_id: str, s3_url: str, db: Session):
         if video:
             video.explicit_content_detected = False
             db.commit()
-        
-
-    # Extract transcription
-
-    # Debug: Print the full transcription response
-    # print("Full Transcription Response:", result.annotation_results[0].speech_transcriptions)
 
     transcription = ""
     for speech_transcription in result.annotation_results[0].speech_transcriptions:
         for alternative in speech_transcription.alternatives:
             transcription += alternative.transcript + " "
-        
-        # if speech_transcription.alternatives:
-        #     transcription += speech_transcription.alternatives[0].transcript + " "
 
     # Generate title and description
     title, description = generate_title_description(transcription, labels)
 
     # Update video metadata in PostgreSQL
     video = db.query(Video).filter(Video.video_id == video_id).first()
-    
-    # print labels for debugging
-    print(labels)
 
     if video:
         video.tags = labels  # Ensure labels is JSON-serializable
@@ -197,18 +183,16 @@ def get_db():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup logic
     create_index()  # Ensure the Elasticsearch index is created
     print("Application startup complete. OK!")
     
-    yield  # This is where the application runs
+    yield
 
-    # Shutdown logic (if needed)
     print("Application shutdown complete. OK!")
 
 app = FastAPI(lifespan=lifespan)
 
-# Add CORS middleware
+# Add CORS middleware as per requirements
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -217,17 +201,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Test endpoint
 @app.get("/abx")
 def home2():
     return {"message": "Welcome to the Video Backend!"}
 
+# Test DB endpoint
 @app.get("/test-db")
 def test_db(db: Session = Depends(get_db)):
     # Fetch all videos
     videos = db.query(Video).all()
     return [{"video_id": v.video_id, "s3_url": v.s3_url, "tags": v.tags} for v in videos]
 
-
+# Upload video endpoint
 @app.post("/upload")
 async def upload_video(title : str = Form("Untitled Video") , description: str = Form("N/A"), file: UploadFile = File(...), db: Session = Depends(get_db)):
     video_id = str(uuid.uuid4())
@@ -268,17 +254,11 @@ async def analyze(video_id: str, db: Session = Depends(get_db)):
     video = db.query(Video).filter(Video.video_id == video_id).first()
     if not video:
         return {"error": "Video not found"}
-    
-    # Get the presigned URL
+
     presigned_url = generate_presigned_url(bucket_name, video.s3_url)
 
     analysis_results = analyze_video(video_id, presigned_url, db)
 
-    print()
-    print()
-    print(analysis_results["tags"])
-    print()
-    print()
     # Update Elasticsearch index with the analysis results
     es.update(index="videos", id=video_id, body={
         "doc": {
@@ -305,10 +285,8 @@ async def analyze(video_id: str, db: Session = Depends(get_db)):
 # endpoint to fetch videos flagged for moderation
 @app.get("/moderation")
 def get_moderation_videos(db: Session = Depends(get_db)):
-    # Fetch videos with explicit content flagged
     videos = db.query(Video).filter(Video.explicit_content != None).all()
 
-    # Filter videos where explicit content likelihood is "VERY_LIKELY" or "LIKELY"
     flagged_videos = []
     for video in videos:
         for frame in video.explicit_content:
@@ -322,6 +300,7 @@ def get_moderation_videos(db: Session = Depends(get_db)):
 
     return flagged_videos
 
+# endpoint to search videos
 @app.get("/search")
 def search_videos(query: str):
     # Search videos using Elasticsearch
@@ -340,7 +319,7 @@ def search_videos(query: str):
 @app.get("/videos")
 def list_videos(db: Session = Depends(get_db)):
     videos = db.query(Video).order_by(Video.id.desc()).all()
-    # return all the fields of all the videos
+
     return [{"video_id": v.video_id, "s3_url": f"https://aws-vod-1-source71e471f1-rgfsfngoq2jv.s3.amazonaws.com/{v.s3_url}", "title": v.title, "description": v.description, "tags": v.tags, "explicit_content": v.explicit_content, "transcription": v.transcription, "ai_generated_title": v.ai_generated_title, "ai_generated_description": v.ai_generated_description, "streaming_url": v.streaming_url, "explicit_content_detected": v.explicit_content_detected} for v in videos]
 
 # get a specific video
@@ -352,6 +331,9 @@ def get_video(video_id: str, db: Session = Depends(get_db)):
     else:
         raise HTTPException(status_code=404, detail="Video not found")
 
+# mediaconvert callback endpoint to update video streaming URL
+# IMPORTANT: This endpoint should be publicly accessible to receive notifications from AWS SNS and subscribe to the SNS topic
+# If running locally, you can use a tool like ngrok to expose your local server to the internet or do port forwarding(in built in VSCode)
 @app.post("/mediaconvert-callback")
 async def mediaconvert_callback(request: Request, db: Session = Depends(get_db)):
     try:
